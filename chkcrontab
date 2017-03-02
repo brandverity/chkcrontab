@@ -37,28 +37,18 @@ def main(argv):
     print('ERROR: No crontab file was specified.')
     sys.exit(1)
 
-  log = check.LogCounter()
-  print('Checking correctness of %s' % argv[1])
-  return check.check_crontab(argv[1], log, get_whitelisted_users(argv))
-
-def get_whitelisted_users(argv):
-  """Gets the list of whitelisted users, if any.
-
-  Args:
-    argv: The argument string supplied by the caller.
-
-  Returns:
-    The list of whitelisted users.
-  """
   parser = OptionParser()
   parser.add_option('-w', '--whitelist', dest='whitelisted_users', action='append',
                     help='A user to ignore when warning of unrecognized users  This argument may be passed multiple times.')
+  parser.add_option('-i', '--ignore_users', dest='ignore_users', action='store_true', default=False,
+                    help='If cron files will not have users specified do not try and validate them')
+  parser.add_option('-f', '--ignore_filenames', dest='ignore_filenames', action='store_true', default=False,
+                    help='Do not validate that the filenames themselves are valid')
   (options, args) = parser.parse_args(argv)
 
-  if options.whitelisted_users:
-    return options.whitelisted_users
-  else:
-    return None
+  log = check.LogCounter()
+  print('Checking correctness of %s' % argv[1])
+  return check.check_crontab(argv[1], log, options.whitelisted_users, ignore_users=options.ignore_users, ignore_filenames=options.ignore_filenames)
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv))

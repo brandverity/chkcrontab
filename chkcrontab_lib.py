@@ -795,8 +795,8 @@ class CronLineUnknown(object):
 class CronLineFactory(object):
   """Classify a line in a cron field by what type of line it is."""
 
-  def __init__(self):
-    pass
+  def __init__(self, ignore_users):
+    self.ignore_users = ignore_users
 
   def ParseLine(self, line):
     """Classify a line.
@@ -809,12 +809,22 @@ class CronLineFactory(object):
     """
     chkcrontab_cmd = re.compile('##*\s*chkcrontab:\s*(.*)=(.*)')
     assignment_line_re = re.compile('[a-zA-Z_][a-zA-Z0-9_]*\s*=(.*)')
-    at_line_re = re.compile('@(\S+)\s+(\S+)\s+(.*)')
     cron_time_field_re = '[\*0-9a-zA-Z,/-]+'
-    time_field_job_line_re = re.compile(
-        '^\s*(%s)\s+(%s)\s+(%s)\s+(%s)\s+(%s)\s+(\S+)\s+(.*)' %
-        (cron_time_field_re, cron_time_field_re, cron_time_field_re,
-         cron_time_field_re, cron_time_field_re))
+    if not self.ignore_users:
+        at_line_re = re.compile('@(\S+)\s+(\S+)\s+(.*)')
+        time_field_job_line_re = re.compile(
+            '^\s*(%s)\s+(%s)\s+(%s)\s+(%s)\s+(%s)\s+(\S+)\s+(.*)' %
+            (cron_time_field_re, cron_time_field_re, cron_time_field_re,
+             cron_time_field_re, cron_time_field_re))
+    else:
+        at_line_re = re.compile('@(\S+)\s+(.*)')
+        time_field_job_line_re = re.compile(
+            '^\s*(%s)\s+(%s)\s+(%s)\s+(%s)\s+(%s)\s+(.*)' %
+            (cron_time_field_re, cron_time_field_re, cron_time_field_re,
+             cron_time_field_re, cron_time_field_re))
+
+
+
 
     if not line:
       return CronLineEmpty()
@@ -832,8 +842,12 @@ class CronLineFactory(object):
 
     match = at_line_re.match(line)
     if match:
-      return CronLineAt(match.groups()[0], match.groups()[1],
-                        match.groups()[2])
+        if not self.ignore_users:
+            time_field, user, command = match.groups()[0], match.groups()[1], match.groups()[2]
+        else:
+            time_field, user, command = match.groups()[0], None, match.groups()[1]
+
+        return CronLineAt(time_field, user, command)
 
     # Is this line a cron job specifier?
     match = time_field_job_line_re.match(line)
@@ -845,7 +859,13 @@ class CronLineFactory(object):
           'month': match.groups()[3],
           'day of week': match.groups()[4],
           }
-      return CronLineTime(field, match.groups()[5], match.groups()[6])
+
+      if not self.ignore_users:
+          user, command = match.groups()[5], match.groups()[6]
+      else:
+          user, command = None, match.groups()[5]
+
+      return CronLineTime(field, user, command)
 
     return CronLineUnknown()
 
@@ -1043,7 +1063,7 @@ class LogCounter(object):
     return self._error_count
 
 
-def check_crontab(crontab_file, log, whitelisted_users=None):
+def check_crontab(crontab_file, log, whitelisted_users=None, ignore_users=False, ignore_filenames=False):
   """Check a crontab file.
 
   Checks crontab_file for a variety of errors or potential errors.  This only
@@ -1068,19 +1088,23 @@ def check_crontab(crontab_file, log, whitelisted_users=None):
   if whitelisted_users:
     USER_WHITELIST.update(whitelisted_users)
 
-  # Check the file name.
-  if re.search('[^A-Za-z0-9_-]', os.path.basename(crontab_file)):
-    in_whitelist = False
-    for pattern in FILE_RE_WHITELIST:
-      if pattern.search(os.path.basename(crontab_file)):
-        in_whitelist = True
-        break
-    if not in_whitelist:
-      log.Warn('Cron will not process this file - its name must match'
-               ' [A-Za-z0-9_-]+ .')
+  if ignore_users:
+      USER_WHITELIST.add(None)
+
+  if not ignore_filenames:
+      # Check the file name.
+      if re.search('[^A-Za-z0-9_-]', os.path.basename(crontab_file)):
+        in_whitelist = False
+        for pattern in FILE_RE_WHITELIST:
+          if pattern.search(os.path.basename(crontab_file)):
+            in_whitelist = True
+            break
+        if not in_whitelist:
+          log.Warn('Cron will not process this file - its name must match'
+                   ' [A-Za-z0-9_-]+ .')
 
   line_no = 0
-  cron_line_factory = CronLineFactory()
+  cron_line_factory = CronLineFactory(ignore_users)
   with open(crontab_file, 'r') as crontab_f:
     for line in crontab_f:
       missing_newline = line[-1] != "\n"
